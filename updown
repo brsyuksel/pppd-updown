@@ -1,0 +1,129 @@
+#!/bin/bash
+
+# realpath of this file
+REALPATH=$(dirname $(readlink -f "$0"))
+
+# usage message
+usage(){
+	manager=$REALPATH/updown
+	cat << EOF
+updown
+usage: 	$manager [CMD]
+	$manager [CMD] FILENAME
+
+$manager 					- show this usage message
+$manager link					- make ip-up and ip-down symbolic links to this file
+$manager template FILENAME			- create template file named FILENAME for provider
+
+EOF
+
+	exit 0
+}
+
+# create ip-up and ip-down symbolic links
+make_links(){
+	ln -sf $REALPATH/updown $REALPATH/ip-up &> /dev/null
+	ln -sf $REALPATH/updown $REALPATH/ip-down &> /dev/null
+
+	if [ "$?" -eq 1 ]; then
+		echo "you can not perform this"
+		exit 1
+	fi
+	echo "links created"
+	exit 0
+}
+
+# create template file
+create_template(){
+	# check permissions
+	if [ ! -w $REALPATH ]; then
+		echo "$REALPATH is not writable"
+		exit 1
+	fi
+
+	sample_file=$REALPATH/updown.$1
+	
+	# if file is not exists, create template
+	if [ ! -f "$sample_file" ]; then
+		# service script template
+		cat << EOF > $sample_file
+
+start(){
+	# define your routing and routine on up state at here
+
+	exit 0
+}
+
+stop(){
+	# define your routing and routine on down state at here
+
+	exit 0
+}
+EOF
+	fi
+
+	# if default editor environ is defined
+	# open template file with it and wait until
+	# process has been ended
+	if [ $EDITOR ] && [ -x ${editor=$(which $EDITOR)} ]; then
+		$editor $sample_file
+		wait $!
+		echo "now, you can run pppd command"
+	else
+		echo "$sample_file created, edit as provider specific"
+	fi
+
+	exit 0
+}
+
+run_provider_updown(){
+	provider_script=$REALPATH/updown.$2
+
+	# if file is not exists, exit 1
+	if [ ! -f $provider_script ]; then
+		exit 1
+	fi
+
+	# source provider script for to be available calling functions
+	. $provider_script
+
+	# $1 is if-up, call start function
+	# otherwise call stop
+	if [ "$1" == "ip-up" ]; then
+		start
+		# exit status same as start
+		exit $?
+	fi
+
+	stop
+	exit $?
+}
+
+# detech which file executed (ip-up,ip-down,updown)
+cmd=$(basename $0)
+case "$cmd" in
+	ip-up|ip-down)
+		# the script called as ip-up or ip-down via links
+		# this means pppd was called this script. 
+
+		# if $6 param is not available then nothing to do
+		if [ ! $6 ]; then
+			exit 1
+		fi
+		run_provider_updown $cmd $6
+		;;
+	updown)
+		if [ "$#" -eq 0 ]; then
+			usage
+		fi
+
+		# hardcoded command detecting
+		if [ "$1" == "link" ]; then
+			make_links
+		elif [ "$1" == "template" ] && [ $2 ]; then
+			create_template $2
+		else
+			usage
+		fi
+		;;
+esac
